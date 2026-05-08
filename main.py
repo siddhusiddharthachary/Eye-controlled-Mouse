@@ -5,7 +5,7 @@ import pyautogui
 # Webcam
 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
-# Get screen size
+# Screen size
 screen_w, screen_h = pyautogui.size()
 
 # MediaPipe Face Mesh
@@ -18,15 +18,17 @@ face_mesh = mp_face_mesh.FaceMesh(
     min_tracking_confidence=0.5
 )
 
-# Iris landmark indices
+pyautogui.FAILSAFE = False
+pyautogui.PAUSE = 0
+
+# Iris landmarks
 LEFT_IRIS = [474, 475, 476, 477]
-RIGHT_IRIS = [469, 470, 471, 472]
 
-# Smoothing variables
+LEFT_EYE_LEFT_CORNER = 263
+LEFT_EYE_RIGHT_CORNER = 362
+
+# Smoothing
 prev_x = 0
-prev_y = 0
-
-# Smoothing factor
 smoothening = 0.2
 
 while True:
@@ -38,7 +40,7 @@ while True:
     # Mirror effect
     frame = cv2.flip(frame, 1)
 
-    # Convert BGR to RGB
+    # RGB conversion
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
     # Process frame
@@ -50,63 +52,94 @@ while True:
 
         for face_landmarks in results.multi_face_landmarks:
 
-            eye_centers = []
+            # ----------------------------
+            # IRIS CENTER
+            # ----------------------------
 
-            # Process both eyes
-            for iris_indices in [LEFT_IRIS, RIGHT_IRIS]:
+            iris_points = []
 
-                iris_points = []
+            for idx in LEFT_IRIS:
 
-                for idx in iris_indices:
+                landmark = face_landmarks.landmark[idx]
 
-                    landmark = face_landmarks.landmark[idx]
+                x = int(landmark.x * frame_w)
+                y = int(landmark.y * frame_h)
 
-                    x = int(landmark.x * frame_w)
-                    y = int(landmark.y * frame_h)
+                iris_points.append((x, y))
 
-                    iris_points.append((x, y))
+                cv2.circle(frame, (x, y), 2, (0, 255, 0), -1)
 
-                    # Draw iris points
-                    cv2.circle(frame, (x, y), 2, (0, 255, 0), -1)
+            iris_x = int(sum([p[0] for p in iris_points]) / len(iris_points))
+            iris_y = int(sum([p[1] for p in iris_points]) / len(iris_points))
 
-                # Calculate eye center
-                center_x = int(sum([p[0] for p in iris_points]) / len(iris_points))
-                center_y = int(sum([p[1] for p in iris_points]) / len(iris_points))
+            cv2.circle(frame, (iris_x, iris_y), 5, (0, 0, 255), -1)
 
-                eye_centers.append((center_x, center_y))
+            # ----------------------------
+            # EYE CORNERS
+            # ----------------------------
 
-                # Draw center point
-                cv2.circle(frame, (center_x, center_y), 5, (0, 0, 255), -1)
+            left_corner = face_landmarks.landmark[LEFT_EYE_LEFT_CORNER]
+            right_corner = face_landmarks.landmark[LEFT_EYE_RIGHT_CORNER]
 
-            # Average both eyes
-            avg_x = int(sum([p[0] for p in eye_centers]) / len(eye_centers))
-            avg_y = int(sum([p[1] for p in eye_centers]) / len(eye_centers))
+            x1 = int(left_corner.x * frame_w)
+            x2 = int(right_corner.x * frame_w)
+            left_x = min(x1, x2)
+            right_x = max(x1, x2)
 
-            # Draw combined center
-            cv2.circle(frame, (avg_x, avg_y), 8, (255, 0, 0), -1)
+            # Draw corners
+            cv2.circle(frame, (left_x, iris_y), 5, (255, 0, 0), -1)
+            cv2.circle(frame, (right_x, iris_y), 5, (255, 0, 0), -1)
 
-            # Convert to screen coordinates
-            screen_x = screen_w * (avg_x / frame_w)
-            screen_y = screen_h * (avg_y / frame_h)
+            # ----------------------------
+            # RELATIVE POSITION
+            # ----------------------------
 
-            # Smooth mouse movement
-            curr_x = prev_x + (screen_x - prev_x) * smoothening
-            curr_y = prev_y + (screen_y - prev_y) * smoothening
+            eye_width = right_x - left_x
 
-            # Move mouse
-            pyautogui.moveTo(curr_x, curr_y)
+            if eye_width != 0:
 
-            # Update previous position
-            prev_x = curr_x
-            prev_y = curr_y
+                ratio = (iris_x - left_x) / eye_width
+                ratio = (ratio - 0.5) * 5 + 0.5
+                ratio = max(0, min(ratio, 1))
+                
+                
 
-    # Show output
-    cv2.imshow("Eye Controlled Mouse", frame)
+                # Convert to screen coordinates
+                screen_x = ratio * screen_w * 2
+                screen_x = max(0, min(screen_x, screen_w))
 
-    # Exit on Q
+                # Smooth movement
+                curr_x = prev_x + (screen_x - prev_x) * smoothening
+                print(
+                    f"IrisX: {iris_x}, "
+                    f"LeftX: {left_x}, "
+                    f"RightX: {right_x}, "
+                    f"EyeWidth: {eye_width}"
+                )
+                print(f"Ratio: {ratio:.2f}")
+
+                # Move mouse horizontally
+                pyautogui.moveTo(curr_x, screen_h / 2)
+
+                prev_x = curr_x
+
+                # Debug text
+                cv2.putText(
+                    frame,
+                    f"Ratio: {ratio:.2f}",
+                    (50, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (0, 255, 255),
+                    2
+                )
+
+    # Show frame
+    cv2.imshow("Relative Eye Tracking", frame)
+
+    # Exit
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# Cleanup
 cap.release()
 cv2.destroyAllWindows()
