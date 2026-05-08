@@ -2,144 +2,139 @@ import cv2
 import mediapipe as mp
 import pyautogui
 
-# Webcam
-cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-
-# Screen size
-screen_w, screen_h = pyautogui.size()
-
-# MediaPipe Face Mesh
-mp_face_mesh = mp.solutions.face_mesh
-
-face_mesh = mp_face_mesh.FaceMesh(
-    refine_landmarks=True,
-    max_num_faces=1,
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5
-)
+# =====================================
+# SETTINGS
+# =====================================
 
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0
 
-# Iris landmarks
-LEFT_IRIS = [474, 475, 476, 477]
+SMOOTHING = 0.2
 
-LEFT_EYE_LEFT_CORNER = 263
-LEFT_EYE_RIGHT_CORNER = 362
+# =====================================
+# SCREEN SIZE
+# =====================================
 
-# Smoothing
+screen_w, screen_h = pyautogui.size()
+
+# =====================================
+# WEBCAM
+# =====================================
+
+cap = cv2.VideoCapture(0)
+
+# =====================================
+# MEDIAPIPE HANDS
+# =====================================
+
+mp_hands = mp.solutions.hands
+hands = mp_hands.Hands(
+    max_num_hands=1,
+    min_detection_confidence=0.7,
+    min_tracking_confidence=0.7
+)
+
+mp_draw = mp.solutions.drawing_utils
+
+# =====================================
+# SMOOTHING VARIABLES
+# =====================================
+
 prev_x = 0
-smoothening = 0.2
+prev_y = 0
+
+# =====================================
+# MAIN LOOP
+# =====================================
 
 while True:
+
     success, frame = cap.read()
 
     if not success:
         break
 
-    # Mirror effect
+    # Flip frame
     frame = cv2.flip(frame, 1)
+
+    frame_h, frame_w, _ = frame.shape
 
     # RGB conversion
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    # Process frame
-    results = face_mesh.process(rgb_frame)
+    # Process hands
+    results = hands.process(rgb_frame)
 
-    frame_h, frame_w, _ = frame.shape
+    if results.multi_hand_landmarks:
 
-    if results.multi_face_landmarks:
+        for hand_landmarks in results.multi_hand_landmarks:
 
-        for face_landmarks in results.multi_face_landmarks:
+            # Draw hand landmarks
+            mp_draw.draw_landmarks(
+                frame,
+                hand_landmarks,
+                mp_hands.HAND_CONNECTIONS
+            )
 
-            # ----------------------------
-            # IRIS CENTER
-            # ----------------------------
+            # =====================================
+            # INDEX FINGER TIP
+            # =====================================
 
-            iris_points = []
+            index_tip = hand_landmarks.landmark[8]
 
-            for idx in LEFT_IRIS:
+            x = int(index_tip.x * frame_w)
+            y = int(index_tip.y * frame_h)
 
-                landmark = face_landmarks.landmark[idx]
+            # Draw fingertip
+            cv2.circle(frame, (x, y), 15, (0, 255, 0), -1)
 
-                x = int(landmark.x * frame_w)
-                y = int(landmark.y * frame_h)
+            # =====================================
+            # SCREEN MAPPING
+            # =====================================
 
-                iris_points.append((x, y))
+            screen_x = screen_w * index_tip.x
+            screen_y = screen_h * index_tip.y
 
-                cv2.circle(frame, (x, y), 2, (0, 255, 0), -1)
+            # =====================================
+            # SMOOTHING
+            # =====================================
 
-            iris_x = int(sum([p[0] for p in iris_points]) / len(iris_points))
-            iris_y = int(sum([p[1] for p in iris_points]) / len(iris_points))
+            curr_x = prev_x + (screen_x - prev_x) * SMOOTHING
+            curr_y = prev_y + (screen_y - prev_y) * SMOOTHING
 
-            cv2.circle(frame, (iris_x, iris_y), 5, (0, 0, 255), -1)
+            # Move cursor
+            pyautogui.moveTo(curr_x, curr_y)
 
-            # ----------------------------
-            # EYE CORNERS
-            # ----------------------------
+            prev_x = curr_x
+            prev_y = curr_y
 
-            left_corner = face_landmarks.landmark[LEFT_EYE_LEFT_CORNER]
-            right_corner = face_landmarks.landmark[LEFT_EYE_RIGHT_CORNER]
+            # =====================================
+            # DEBUG TEXT
+            # =====================================
 
-            x1 = int(left_corner.x * frame_w)
-            x2 = int(right_corner.x * frame_w)
-            left_x = min(x1, x2)
-            right_x = max(x1, x2)
+            cv2.putText(
+                frame,
+                f"X:{int(screen_x)} Y:{int(screen_y)}",
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 255, 255),
+                2
+            )
 
-            # Draw corners
-            cv2.circle(frame, (left_x, iris_y), 5, (255, 0, 0), -1)
-            cv2.circle(frame, (right_x, iris_y), 5, (255, 0, 0), -1)
+    # =====================================
+    # SHOW WINDOW
+    # =====================================
 
-            # ----------------------------
-            # RELATIVE POSITION
-            # ----------------------------
+    cv2.imshow("AI Virtual Mouse", frame)
 
-            eye_width = right_x - left_x
-
-            if eye_width != 0:
-
-                ratio = (iris_x - left_x) / eye_width
-                ratio = (ratio - 0.5) * 5 + 0.5
-                ratio = max(0, min(ratio, 1))
-                
-                
-
-                # Convert to screen coordinates
-                screen_x = ratio * screen_w * 2
-                screen_x = max(0, min(screen_x, screen_w))
-
-                # Smooth movement
-                curr_x = prev_x + (screen_x - prev_x) * smoothening
-                print(
-                    f"IrisX: {iris_x}, "
-                    f"LeftX: {left_x}, "
-                    f"RightX: {right_x}, "
-                    f"EyeWidth: {eye_width}"
-                )
-                print(f"Ratio: {ratio:.2f}")
-
-                # Move mouse horizontally
-                pyautogui.moveTo(curr_x, screen_h / 2)
-
-                prev_x = curr_x
-
-                # Debug text
-                cv2.putText(
-                    frame,
-                    f"Ratio: {ratio:.2f}",
-                    (50, 50),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1,
-                    (0, 255, 255),
-                    2
-                )
-
-    # Show frame
-    cv2.imshow("Relative Eye Tracking", frame)
-
-    # Exit
+    # Exit with Q
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
+
+# =====================================
+# CLEANUP
+# =====================================
 
 cap.release()
 cv2.destroyAllWindows()
